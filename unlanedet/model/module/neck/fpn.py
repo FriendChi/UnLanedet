@@ -64,7 +64,7 @@ class FPN(nn.Module):
         self.start_level = 0  # 设置起始层，通常为 0
         self.lateral_convs = nn.ModuleList()  # 用于存储 lateral 卷积层的列表
         self.fpn_convs = nn.ModuleList()  # 用于存储 FPN 卷积层的列表
-
+        self.se_list = nn.ModuleList()
 
         # 初始化 lateral 卷积和 FPN 卷积层
         for i in range(self.start_level, self.backbone_end_level):
