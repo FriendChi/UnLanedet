@@ -31,7 +31,7 @@ class FPN(nn.Module):
                                distribution='uniform'),
                  cfg=None):
         super(FPN, self).__init__()
-        assert isinstance(in_channels, list)
+        # assert isinstance(in_channels, list)
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.num_ins = len(in_channels)
