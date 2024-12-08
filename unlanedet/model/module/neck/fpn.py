@@ -127,7 +127,7 @@ class FPN(nn.Module):
         for i in range(used_backbone_levels - 1, 0, -1):  # 从最后一层往前遍历
             prev_shape = laterals[i - 1].shape[2:]  # 获取上一层的空间维度（不包括 batch 和通道）
             laterals[i - 1] = torch.cat([laterals[i - 1], F.interpolate(laterals[i], size=prev_shape, mode='nearest'  )], dim=1)
-            laterals[i-1] = self.se_list[i](laterals[i-1])
+            laterals[i-1] = self.se_list[i-1](laterals[i-1])
             
         # 对每一层的特征图进行 FPN 卷积处理
         outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)]
