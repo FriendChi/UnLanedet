@@ -21,6 +21,7 @@ class SE_Block(nn.Module):
             nn.Linear(inchannel // ratio, outchannel, bias=False),  # 从 c/r -> c
             nn.Sigmoid()
         )
+        self.outchannel = outchannel
  
     def forward(self, x):
             # 读取批数据图片数量及通道数
@@ -28,7 +29,7 @@ class SE_Block(nn.Module):
             # Fsq操作：经池化后输出b*c的矩阵
             y = self.gap(x).view(b, c)
             # Fex操作：经全连接层输出（b，c，1，1）矩阵
-            y = self.fc(y).view(b, c, 1, 1)
+            y = self.fc(y).view(b, self.outchannel, 1, 1)
             # Fscale操作：将得到的权重乘以原来的特征图x
             return x * y.expand_as(x)
 
