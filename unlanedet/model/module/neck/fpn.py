@@ -79,7 +79,7 @@ class FPN(nn.Module):
                 inplace=False,
             )
             self.bi_convs.append(bi_conv)
-        self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2)
+        # self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2)
     def forward(self, inputs):
         """
         Args:
@@ -115,7 +115,7 @@ class FPN(nn.Module):
         middle_feature = laterals[1].clone()
         
         for i in range(used_backbone_levels - 1):
-            downsampled = self.max_pool(laterals[i])
+            downsampled = nn.AdaptiveAvgPool2d(laterals[i+1].shape[2:])(laterals[i])
             division = pre_weights[i*2]+pre_weights[i*2+1]+1e-6
 
             laterals[i+1] = (
