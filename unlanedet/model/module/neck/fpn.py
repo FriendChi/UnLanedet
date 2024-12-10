@@ -97,6 +97,9 @@ class FPN(nn.Module):
 
         # build top-down path with Fast Normalized Fusion
         used_backbone_levels = len(laterals)
+        
+        
+        laterals[-1] = self.fpn_convs[-1](laterals[-1])
         for i in range(used_backbone_levels - 1, 0, -1):
             prev_shape = laterals[i - 1].shape[2:]
             upsampled = F.interpolate(
@@ -108,7 +111,8 @@ class FPN(nn.Module):
                 fusion_weights[(i - 1)*2] /division* laterals[i - 1]
                 + fusion_weights[(i - 1)*2+1] /division* upsampled
             )
+            laterals[i - 1] = self.fpn_convs[i - 1](laterals[i - 1])
 
         # Apply fpn_convs to each lateral
-        outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)]
-        return tuple(outs)
+        
+        return tuple(laterals)
