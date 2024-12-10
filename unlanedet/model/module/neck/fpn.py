@@ -41,6 +41,7 @@ class FPN(nn.Module):
 
         # Learnable weights for Fast Normalized Fusion
         self.fusion_weights = nn.Parameter(torch.ones(2*(self.num_ins-1), requires_grad=True))
+        self.pre_weights = nn.Parameter(torch.ones(2*(self.num_ins)+1, requires_grad=True))
 
         for i in range(self.start_level, self.backbone_end_level):
             l_conv = ConvModule(
@@ -65,7 +66,20 @@ class FPN(nn.Module):
 
             self.lateral_convs.append(l_conv)
             self.fpn_convs.append(fpn_conv)
-
+        self.bi_convs = nn.ModuleList()
+        for i in range(len(self.lateral_convs)-1):
+            bi_conv = ConvModule(
+                out_channels,
+                out_channels,
+                3,
+                padding=1,
+                conv_cfg=None,
+                norm_cfg=None,
+                act_cfg=None,
+                inplace=False,
+            )
+            self.bi_convs.append(bi_conv)
+        self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2)
     def forward(self, inputs):
         """
         Args:
@@ -93,22 +107,50 @@ class FPN(nn.Module):
         ]
 
         # Normalize weights for Fast Normalized Fusion
-        fusion_weights = F.relu(self.fusion_weights)  # Ensure non-negative
+        pre_weights = F.relu(self.pre_weights)  # Ensure non-negative
 
         # build top-down path with Fast Normalized Fusion
         used_backbone_levels = len(laterals)
+
+        middle_feature = laterals[1].clone()
+        
+        for i in range(used_backbone_levels - 1):
+            downsampled = self.max_pool(laterals[i])
+            division = pre_weights[i*2]+pre_weights[i*2+1]+1e-6
+
+            laterals[i+1] = (
+                pre_weights[i*2] /division* laterals[i+1]
+                + pre_weights[i*2+1] /division* downsampled
+            )
+            laterals[i+1] = self.fpn_convs[i](laterals[i+1])
+
+
+        # Normalize weights for Fast Normalized Fusion
+        fusion_weights = F.relu(self.fusion_weights)  # Ensure non-negative
+
+        
+        laterals[-1] = self.fpn_convs[-1](laterals[-1])
         for i in range(used_backbone_levels - 1, 0, -1):
             prev_shape = laterals[i - 1].shape[2:]
             upsampled = F.interpolate(
                 laterals[i], size=prev_shape, mode='nearest'
             )
-            division = fusion_weights[(i - 1)*2]+fusion_weights[(i - 1)*2+1]+1e-6
-            # Apply normalized weights
-            laterals[i - 1] = (
-                fusion_weights[(i - 1)*2] /division* laterals[i - 1]
-                + fusion_weights[(i - 1)*2+1] /division* upsampled
-            )
+            if i-1 == 1:
+                division = fusion_weights[(i - 1)*2]+fusion_weights[(i - 1)*2+1]+1e-6+pre_weights[-1]
+                # Apply normalized weights
+                laterals[i - 1] = (
+                    fusion_weights[(i - 1)*2] /division* laterals[i - 1]
+                    + fusion_weights[(i - 1)*2+1] /division* upsampled+pre_weights[-1] /division* middle_feature
+                )                
+            else:    
+                division = fusion_weights[(i - 1)*2]+fusion_weights[(i - 1)*2+1]+1e-6
+                # Apply normalized weights
+                laterals[i - 1] = (
+                    fusion_weights[(i - 1)*2] /division* laterals[i - 1]
+                    + fusion_weights[(i - 1)*2+1] /division* upsampled
+                )
+            laterals[i - 1] = self.fpn_convs[i - 1](laterals[i - 1])
 
         # Apply fpn_convs to each lateral
-        outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)]
-        return tuple(outs)
+        
+        return tuple(laterals)
