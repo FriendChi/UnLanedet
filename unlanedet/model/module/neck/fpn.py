@@ -5,7 +5,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from mmcv.cnn import ConvModule
-from ....layers import Conv2d,get_norm,Activation
 
 class FPN(nn.Module):
     def __init__(self,
