@@ -32,13 +32,16 @@ class TuSimple(BaseDataset):
         self.logger.info('Loading TuSimple annotations...')
         self.data_infos = []
         max_lanes = 0
-        for anno_file in self.anno_files:
-            anno_file = osp.join(self.data_root, anno_file)
+        for anno_file_ in self.anno_files:
+            anno_file = osp.join(self.data_root, anno_file_)
             with open(anno_file, 'r') as anno_obj:
                 lines = anno_obj.readlines()
             for line in lines:
                 data = json.loads(line)
-                data['raw_file'] = osp.join('train_set',data['raw_file'])
+                if anno_file_ == 'test_label.json':
+                    data['raw_file'] = osp.join('test_set',data['raw_file'])
+                else:
+                    data['raw_file'] = osp.join('train_set',data['raw_file'])
                 y_samples = data['h_samples']
                 gt_lanes = data['lanes']
                 mask_path = data['raw_file'].replace('clips', 'seg_label')[:-3] + 'png'
