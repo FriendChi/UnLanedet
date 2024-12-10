@@ -10,9 +10,9 @@ import random
 
 
 SPLIT_FILES = {
-    'trainval': ['label_data_0313.json', 'label_data_0601.json', 'label_data_0531.json'],
-    'train': ['label_data_0313.json', 'label_data_0601.json'],
-    'val': ['label_data_0531.json'],
+    'trainval': ['train_set/label_data_0313.json', 'train_set/label_data_0601.json', 'train_set/label_data_0531.json'],
+    'train': ['train_set/label_data_0313.json', 'train_set/label_data_0601.json'],
+    'val': ['train_set/label_data_0531.json'],
     'test': ['test_label.json'],
 }
 
