@@ -38,6 +38,7 @@ class TuSimple(BaseDataset):
                 lines = anno_obj.readlines()
             for line in lines:
                 data = json.loads(line)
+                data['raw_file'] = osp.join('train_set',data['raw_file'])
                 y_samples = data['h_samples']
                 gt_lanes = data['lanes']
                 mask_path = data['raw_file'].replace('clips', 'seg_label')[:-3] + 'png'
