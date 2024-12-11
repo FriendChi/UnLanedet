@@ -75,10 +75,10 @@ class LaneEval(object):
             raw_file = pred['raw_file']
             pred_lanes = pred['lanes']
             run_time = pred['run_time']
-            if raw_file not in gts:
+            if raw_file[9:] not in gts:
                 raise Exception(
                     'Some raw_file from your predictions do not exist in the test tasks.'+raw_file)
-            gt = gts[raw_file]
+            gt = gts[raw_file[9:]]
             gt_lanes = gt['lanes']
             y_samples = gt['h_samples']
             try:
