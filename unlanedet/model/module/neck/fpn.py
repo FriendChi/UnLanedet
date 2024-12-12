@@ -4,8 +4,84 @@ import fvcore.nn.weight_init as weight_init
 import torch
 import torch.nn.functional as F
 from torch import nn
+import torch.nn as nn
+import torch.nn.functional as F
 
+from mmcv.cnn import ConvModule
 from ....layers import Conv2d,get_norm,Activation
+
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+
+class ConvBNReLU(nn.Module):
+    '''Module for the Conv-BN-ReLU tuple.'''
+    def __init__(self, c_in, c_out, kernel_size, stride, padding, dilation,
+                 use_relu=True):
+        super(ConvBNReLU, self).__init__()
+        self.conv = nn.Conv2d(
+                c_in, c_out, kernel_size=kernel_size, stride=stride, 
+                padding=padding, dilation=dilation, bias=False)
+        self.bn = nn.BatchNorm2d(c_out)
+        if use_relu:
+            self.relu = nn.ReLU(inplace=True)
+        else:
+            self.relu = None
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        if self.relu is not None:
+            x = self.relu(x)
+        return x
+
+
+class CARAFE(nn.Module):
+    def __init__(self, c, c_mid=64, scale=2, k_up=5, k_enc=3):
+        """ The unofficial implementation of the CARAFE module.
+
+        The details are in "https://arxiv.org/abs/1905.02188".
+
+        Args:
+            c: The channel number of the input and the output.
+            c_mid: The channel number after compression.
+            scale: The expected upsample scale.
+            k_up: The size of the reassembly kernel.
+            k_enc: The kernel size of the encoder.
+
+        Returns:
+            X: The upsampled feature map.
+        """
+        super(CARAFE, self).__init__()
+        self.scale = scale
+
+        self.comp = ConvBNReLU(c, c_mid, kernel_size=1, stride=1, 
+                               padding=0, dilation=1)
+        self.enc = ConvBNReLU(c_mid, (scale*k_up)**2, kernel_size=k_enc, 
+                              stride=1, padding=k_enc//2, dilation=1, 
+                              use_relu=False)
+        self.pix_shf = nn.PixelShuffle(scale)
+
+        self.upsmp = nn.Upsample(scale_factor=scale, mode='nearest')
+        self.unfold = nn.Unfold(kernel_size=k_up, dilation=scale, 
+                                padding=k_up//2*scale)
+
+    def forward(self, X):
+        b, c, h, w = X.size()
+        h_, w_ = h * self.scale, w * self.scale
+        
+        W = self.comp(X)                                # b * m * h * w
+        W = self.enc(W)                                 # b * 100 * h * w
+        W = self.pix_shf(W)                             # b * 25 * h_ * w_
+        W = F.softmax(W, dim=1)                         # b * 25 * h_ * w_
+
+        X = self.upsmp(X)                               # b * c * h_ * w_
+        X = self.unfold(X)                              # b * 25c * h_ * w_
+        X = X.view(b, c, -1, h_, w_)                    # b * 25 * c * h_ * w_
+
+        X = torch.einsum('bkhw,bckhw->bchw', [W, X])    # b * c * h_ * w_
+        return X
 
 class FPN(nn.Module):
     def __init__(self,
@@ -28,136 +104,84 @@ class FPN(nn.Module):
                                distribution='uniform'),
                  cfg=None):
         super(FPN, self).__init__()
-#        import pdb;pdb.set_trace()
-#        assert isinstance(in_channels, list)
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.num_ins = len(in_channels)
-        self.num_outs = num_outs
-        self.attention = attention
-        self.relu_before_extra_convs = relu_before_extra_convs
-        self.no_norm_on_lateral = no_norm_on_lateral
-        self.upsample_cfg = upsample_cfg.copy()
+        # assert isinstance(in_channels, list)
+        self.in_channels = in_channels  # 保存输入通道列表
+        self.out_channels = out_channels  # 保存输出通道数
+        self.num_ins = len(in_channels)  # 输入的特征图数量（等于 in_channels 的长度）
+        self.num_outs = num_outs  # 输出特征图的层数
 
-        if end_level == -1:
-            self.backbone_end_level = self.num_ins
-            assert num_outs >= self.num_ins - start_level
-        else:
-            # if end_level < inputs, no extra level is allowed
-            self.backbone_end_level = end_level
-            assert end_level <= len(in_channels)
-            assert num_outs == end_level - start_level
-        self.start_level = start_level
-        self.end_level = end_level
-        self.add_extra_convs = add_extra_convs
-        assert isinstance(add_extra_convs, (str, bool))
-        if isinstance(add_extra_convs, str):
-            # Extra_convs_source choices: 'on_input', 'on_lateral', 'on_output'
-            assert add_extra_convs in ('on_input', 'on_lateral', 'on_output')
-        elif add_extra_convs:  # True
-            if extra_convs_on_inputs:
-                # TODO: deprecate `extra_convs_on_inputs`
-                warnings.simplefilter('once')
-                warnings.warn(
-                    '"extra_convs_on_inputs" will be deprecated in v2.9.0,'
-                    'Please use "add_extra_convs"', DeprecationWarning)
-                self.add_extra_convs = 'on_input'
-            else:
-                self.add_extra_convs = 'on_output'
+        self.backbone_end_level = self.num_ins  # 设置骨干网络的结束层（即输入的层数）
+        self.start_level = 0  # 设置起始层，通常为 0
+        self.lateral_convs = nn.ModuleList()  # 用于存储 lateral 卷积层的列表
+        self.fpn_convs = nn.ModuleList()  # 用于存储 FPN 卷积层的列表
+        self.upsamples = nn.ModuleList()
 
-        self.lateral_convs = nn.ModuleList()
-        self.fpn_convs = nn.ModuleList()
-
+        # 初始化 lateral 卷积和 FPN 卷积层
         for i in range(self.start_level, self.backbone_end_level):
-            l_conv = Conv2d(
-                in_channels[i],
-                out_channels,
-                1,
-                norm = get_norm(norm_cfg,out_channels) if not self.no_norm_on_lateral else None,
-                activation = Activation(act=act_cfg)
+            #横向卷积层,1*1卷积用于保持通道统一
+            l_conv = ConvModule(
+                in_channels[i],  # 输入通道数
+                out_channels,  # 输出通道数
+                1,  # 卷积核大小为 1
+                conv_cfg=None,  # 卷积配置（未指定）
+                norm_cfg=None,  # 归一化配置（未指定）
+                act_cfg=None,  # 激活函数配置（未指定）
+                inplace=False,
             )
-            fpn_conv = Conv2d(out_channels,
-                              out_channels,
-                              3,
-                              padding=1,
-                              norm = get_norm(norm_cfg,out_channels),
-                              activation = Activation(act=act_cfg))
+            # FPN 卷积层，处理后的通道和尺寸都不变
+            fpn_conv = ConvModule(
+                out_channels,  # 输入通道数为输出通道数
+                out_channels,  # 输出通道数
+                3,  # 卷积核大小为 3
+                padding=1,  # padding 为 1
+                conv_cfg=None,  # 卷积配置（未指定）
+                norm_cfg=None,  # 归一化配置（未指定）
+                act_cfg=None,  # 激活函数配置（未指定）
+                inplace=False,
+            )
 
-            self.lateral_convs.append(l_conv)
-            self.fpn_convs.append(fpn_conv)
-
-        # add extra conv layers (e.g., RetinaNet)
-        extra_levels = num_outs - self.backbone_end_level + self.start_level
-        if self.add_extra_convs and extra_levels >= 1:
-            for i in range(extra_levels):
-                if i == 0 and self.add_extra_convs == 'on_input':
-                    in_channels = self.in_channels[self.backbone_end_level - 1]
-                else:
-                    in_channels = out_channels
-                extra_fpn_conv = Conv2d(in_channels,
-                                        out_channels,
-                                        3,
-                                        stride=2,
-                                        padding=1,
-                                        norm = get_norm(norm_cfg,out_channels),
-                                        activation = Activation(act=act_cfg)
-                                         )
-                self.fpn_convs.append(extra_fpn_conv)
+            self.lateral_convs.append(l_conv)  # 将 lateral 卷积层添加到列表中
+            self.fpn_convs.append(fpn_conv)  # 将 FPN 卷积层添加到列表中
+        
+        for i in range(len(self.lateral_convs)-1):
+            self.upsamples.append(CARAFE(out_channels))
 
     def forward(self, inputs):
-        """Forward function."""
-        assert len(inputs) >= len(self.in_channels)
+        """
+        Args:
+            inputs (List[torch.Tensor]): Input feature maps.
+              Example of shapes:
+                ([1, 64, 80, 200], [1, 128, 40, 100], [1, 256, 20, 50], [1, 512, 10, 25]).
+        Returns:
+            outputs (Tuple[torch.Tensor]): Output feature maps.
+              The number of feature map levels and channels correspond to
+               `num_outs` and `out_channels` respectively.
+              Example of shapes:
+                ([1, 64, 40, 100], [1, 64, 20, 50], [1, 64, 10, 25]).
+        """
+        if type(inputs) == tuple:  # 如果输入是 tuple 类型，将其转换为 list 类型
+            inputs = list(inputs)
 
-        if len(inputs) > len(self.in_channels):
-            for _ in range(len(inputs) - len(self.in_channels)):
+        assert len(inputs) >= len(self.in_channels)  # 确保输入的特征图数量不小于 in_channels 的长度
+
+        if len(inputs) > len(self.in_channels):  # 如果输入的特征图数量大于 in_channels 的长度
+            for _ in range(len(inputs) - len(self.in_channels)):  # 删除多余的输入特征图
                 del inputs[0]
 
-        # build laterals
+        # 构建 lateral 卷积层的输出
         laterals = [
-            lateral_conv(inputs[i + self.start_level])
+            lateral_conv(inputs[i + self.start_level])  # 通过 lateral 卷积对每个输入特征图进行处理
             for i, lateral_conv in enumerate(self.lateral_convs)
         ]
 
-        # build top-down path
-        used_backbone_levels = len(laterals)
-        for i in range(used_backbone_levels - 1, 0, -1):
-            # In some cases, fixing `scale factor` (e.g. 2) is preferred, but
-            #  it cannot co-exist with `size` in `F.interpolate`.
-            if 'scale_factor' in self.upsample_cfg:
-                laterals[i - 1] += F.interpolate(laterals[i],
-                                                 **self.upsample_cfg)
-            else:
-                prev_shape = laterals[i - 1].shape[2:]
-                laterals[i - 1] += F.interpolate(laterals[i],
-                                                 size=prev_shape,
-                                                 **self.upsample_cfg)
+        # 构建自顶向下的路径
+        used_backbone_levels = len(laterals)  # 使用的骨干网络层数，即 lateral 卷积层的数量
+        for i in range(used_backbone_levels - 1, 0, -1):  # 从最后一层往前遍历
+            laterals[i - 1] += self.upsamples[i-1](laterals[i])  # 将当前层的特征图上采样到上一层的大小并进行融合
 
-        # build outputs
-        # part 1: from original levels
-        outs = [
-            self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)
-        ]
-        # part 2: add extra levels
-        if self.num_outs > len(outs):
-            # use max pool to get more levels on top of outputs
-            # (e.g., Faster R-CNN, Mask R-CNN)
-            if not self.add_extra_convs:
-                for i in range(self.num_outs - used_backbone_levels):
-                    outs.append(F.max_pool2d(outs[-1], 1, stride=2))
-            # add conv layers on top of original feature maps (RetinaNet)
-            else:
-                if self.add_extra_convs == 'on_input':
-                    extra_source = inputs[self.backbone_end_level - 1]
-                elif self.add_extra_convs == 'on_lateral':
-                    extra_source = laterals[-1]
-                elif self.add_extra_convs == 'on_output':
-                    extra_source = outs[-1]
-                else:
-                    raise NotImplementedError
-                outs.append(self.fpn_convs[used_backbone_levels](extra_source))
-                for i in range(used_backbone_levels + 1, self.num_outs):
-                    if self.relu_before_extra_convs:
-                        outs.append(self.fpn_convs[i](F.relu(outs[-1])))
-                    else:
-                        outs.append(self.fpn_convs[i](outs[-1]))
+
+        # 对每一层的特征图进行 FPN 卷积处理
+        outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)]
+        
+        # 返回每一层的输出特征图
         return tuple(outs)
