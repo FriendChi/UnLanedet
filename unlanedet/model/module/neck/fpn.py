@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from ....layers import Conv2d,get_norm,Activation
-
+from mmcv.cnn import ConvModule
 class FPN(nn.Module):
     def __init__(self,
                  in_channels,
