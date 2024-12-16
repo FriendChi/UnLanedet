@@ -112,7 +112,7 @@ class FPN(nn.Module):
             if i == 0:
                 laterals[i] = self.pre_convs[i](laterals[i])
             else:
-                laterals[i] += nn.AdaptiveAvgPool2d(laterals[i].shape[2:])(laterals[i-1])
+                laterals[i] = laterals[i] + nn.AdaptiveAvgPool2d(laterals[i].shape[2:])(laterals[i-1])
                 laterals[i] = self.pre_convs[i](laterals[i])
 
 
