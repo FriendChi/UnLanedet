@@ -105,8 +105,8 @@ class FPN(nn.Module):
             division = fusion_weights[(i - 1)*2]+fusion_weights[(i - 1)*2+1]+1e-6
             # Apply normalized weights
             laterals[i - 1] = (
-                fusion_weights[(i - 1)*2] /division* laterals[i - 1]
-                + fusion_weights[(i - 1)*2+1] /division* upsampled
+                (fusion_weights[(i - 1)*2] /division* laterals[i - 1])
+                * (fusion_weights[(i - 1)*2+1] /division* upsampled)
             )
 
         # Apply fpn_convs to each lateral
