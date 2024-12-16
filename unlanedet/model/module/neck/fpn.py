@@ -41,16 +41,7 @@ class FPN(nn.Module):
         self.upsamples = nn.ModuleList()
         # Learnable weights for Fast Normalized Fusion
         self.fusion_weights = nn.Parameter(torch.ones(2*(self.num_ins-1), requires_grad=True))
-        for i in range(len(self.lateral_convs)-1):
-            conv_transpose = nn.ConvTranspose2d(
-                in_channels=laterals[i].shape[1],  # 输入通道数
-                out_channels=laterals[i].shape[1],  # 输出通道数（保持不变）
-                kernel_size=4,  # 卷积核大小
-                stride=2,  # 步幅为2，以便扩大尺寸
-                padding=1,  # 为了保证输出尺寸为原来两倍，设置合适的padding
-                output_padding=0  # 保持输出尺寸精确为2倍
-            )
-            self.upsamples.append(conv_transpose)                     
+                  
 
         for i in range(self.start_level, self.backbone_end_level):
             l_conv = ConvModule(
@@ -75,7 +66,16 @@ class FPN(nn.Module):
 
             self.lateral_convs.append(l_conv)
             self.fpn_convs.append(fpn_conv)
-
+        for i in range(len(self.lateral_convs)-1):
+            conv_transpose = nn.ConvTranspose2d(
+                in_channels=out_channels,  # 输入通道数
+                out_channels=out_channels,  # 输出通道数（保持不变）
+                kernel_size=4,  # 卷积核大小
+                stride=2,  # 步幅为2，以便扩大尺寸
+                padding=1,  # 为了保证输出尺寸为原来两倍，设置合适的padding
+                output_padding=0  # 保持输出尺寸精确为2倍
+            )
+            self.upsamples.append(conv_transpose)   
     def forward(self, inputs):
         """
         Args:
