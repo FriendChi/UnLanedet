@@ -87,7 +87,7 @@ class FPN(nn.Module):
         self.backbone_end_level = self.num_ins  # 设置骨干网络的结束层（即输入的层数）
         self.start_level = 0  # 设置起始层，通常为 0
         self.lateral_convs = nn.ModuleList()  # 用于存储 lateral 卷积层的列表
-        self.fpn_convs = nn.ModuleList()  # 用于存储 FPN 卷积层的列表
+        # self.fpn_convs = nn.ModuleList()  # 用于存储 FPN 卷积层的列表
         self.galas = nn.ModuleList()
         # 初始化 lateral 卷积和 FPN 卷积层
         for i in range(self.start_level, self.backbone_end_level):
@@ -102,19 +102,19 @@ class FPN(nn.Module):
                 inplace=False,
             )
             # FPN 卷积层，处理后的通道和尺寸都不变
-            fpn_conv = ConvModule(
-                out_channels,  # 输入通道数为输出通道数
-                out_channels,  # 输出通道数
-                3,  # 卷积核大小为 3
-                padding=1,  # padding 为 1
-                conv_cfg=None,  # 卷积配置（未指定）
-                norm_cfg=None,  # 归一化配置（未指定）
-                act_cfg=None,  # 激活函数配置（未指定）
-                inplace=False,
-            )
+            # fpn_conv = ConvModule(
+            #     out_channels,  # 输入通道数为输出通道数
+            #     out_channels,  # 输出通道数
+            #     3,  # 卷积核大小为 3
+            #     padding=1,  # padding 为 1
+            #     conv_cfg=None,  # 卷积配置（未指定）
+            #     norm_cfg=None,  # 归一化配置（未指定）
+            #     act_cfg=None,  # 激活函数配置（未指定）
+            #     inplace=False,
+            # )
 
             self.lateral_convs.append(l_conv)  # 将 lateral 卷积层添加到列表中
-            self.fpn_convs.append(fpn_conv)  # 将 FPN 卷积层添加到列表中
+            # self.fpn_convs.append(fpn_conv)  # 将 FPN 卷积层添加到列表中
             
         for i in range(len(self.lateral_convs)-1):
             self.galas.append(LGAG(out_channels, out_channels, out_channels))
@@ -153,7 +153,7 @@ class FPN(nn.Module):
             laterals[i - 1] = self.galas[i-1](F.interpolate(  laterals[i], size=prev_shape, mode='nearest'  ), laterals[i - 1])
 
         # 对每一层的特征图进行 FPN 卷积处理
-        outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)]
+        # outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)]
         
         # 返回每一层的输出特征图
-        return tuple(outs)
+        return tuple(laterals)
