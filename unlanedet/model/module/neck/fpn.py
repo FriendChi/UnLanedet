@@ -7,6 +7,42 @@ from torch import nn
 
 from ....layers import Conv2d,get_norm,Activation
 
+class CoordAtt(nn.Module):
+    def __init__(self, inp, oup, groups=32):
+        super(CoordAtt, self).__init__()
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+
+        mip = max(8, inp // groups)
+
+        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(mip)
+        self.conv2 = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.conv3 = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.relu = h_swish()
+
+    def forward(self, x):
+        identity = x
+        n,c,h,w = x.size()
+        x_h = self.pool_h(x)
+        x_w = self.pool_w(x).permute(0, 1, 3, 2)
+
+        y = torch.cat([x_h, x_w], dim=2)
+        y = self.conv1(y)
+        y = self.bn1(y)
+        y = self.relu(y) 
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
+
+        x_h = self.conv2(x_h).sigmoid()
+        x_w = self.conv3(x_w).sigmoid()
+        x_h = x_h.expand(-1, -1, h, w)
+        x_w = x_w.expand(-1, -1, h, w)
+
+        y = x_w * x_h
+
+        return y
+
 class FPN(nn.Module):
     def __init__(self,
                  in_channels,
@@ -67,6 +103,7 @@ class FPN(nn.Module):
 
         self.lateral_convs = nn.ModuleList()
         self.fpn_convs = nn.ModuleList()
+        self.ca_list = nn.ModuleList()
 
         for i in range(self.start_level, self.backbone_end_level):
             l_conv = Conv2d(
@@ -104,6 +141,9 @@ class FPN(nn.Module):
                                          )
                 self.fpn_convs.append(extra_fpn_conv)
 
+        for i in range(len(self.lateral_convs)):
+            self.ca_list.append(CoordAtt(out_channels,out_channels))
+
     def forward(self, inputs):
         """Forward function."""
         assert len(inputs) >= len(self.in_channels)
@@ -128,9 +168,9 @@ class FPN(nn.Module):
                                                  **self.upsample_cfg)
             else:
                 prev_shape = laterals[i - 1].shape[2:]
-                laterals[i - 1] *= F.interpolate(laterals[i],
+                laterals[i - 1] *= self.ca_list[i-1](F.interpolate(laterals[i],
                                                  size=prev_shape,
-                                                 **self.upsample_cfg)
+                                                 **self.upsample_cfg))
 
         # build outputs
         # part 1: from original levels
