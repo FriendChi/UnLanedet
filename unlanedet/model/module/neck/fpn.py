@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from mmcv.cnn import ConvModule
-from mmdet.models.builder import NECKS
+
 class DSConv_pro(nn.Module):
     def __init__(
         self,
