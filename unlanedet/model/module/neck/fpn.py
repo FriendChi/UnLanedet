@@ -10,28 +10,36 @@ import torch.nn.functional as F
 from mmcv.cnn import ConvModule
 from ....layers import Conv2d,get_norm,Activation
 
-class SE_Block(nn.Module):
-    def __init__(self, inchannel, ratio=16):
-        super(SE_Block, self).__init__()
-        # 全局平均池化(Fsq操作)
-        self.gap = nn.AdaptiveAvgPool2d((1, 1))
-        # 两个全连接层(Fex操作)
-        self.fc = nn.Sequential(
-            nn.Linear(inchannel, inchannel // ratio, bias=False),  # 从 c -> c/r
-            nn.ReLU(),
-            nn.Linear(inchannel // ratio, inchannel, bias=False),  # 从 c/r -> c
-            nn.Sigmoid()
-        )
- 
+class Channel_Att(nn.Module):
+    def __init__(self, channels):
+        super(Channel_Att, self).__init__()
+        self.channels = channels
+
+        self.bn2 = nn.BatchNorm2d(self.channels, affine=True)
+
     def forward(self, x):
-            # 读取批数据图片数量及通道数
-            b, c, h, w = x.size()
-            # Fsq操作：经池化后输出b*c的矩阵
-            y = self.gap(x).view(b, c)
-            # Fex操作：经全连接层输出（b，c，1，1）矩阵
-            y = self.fc(y).view(b, c, 1, 1)
-            # Fscale操作：将得到的权重乘以原来的特征图x
-            return x * y.expand_as(x)
+        residual = x
+
+        x = self.bn2(x)
+        weight_bn = self.bn2.weight.data.abs() / torch.sum(self.bn2.weight.data.abs())
+        x = x.permute(0, 2, 3, 1).contiguous()
+        x = torch.mul(weight_bn, x)
+        x = x.permute(0, 3, 1, 2).contiguous()
+
+        x = torch.sigmoid(x) * residual  #
+
+        return x
+
+
+class NAMAttention(nn.Module):
+    def __init__(self, channels):
+        super(NAMAttention, self).__init__()
+        self.Channel_Att = Channel_Att(channels)
+
+    def forward(self, x):
+        x_out1 = self.Channel_Att(x)
+
+        return x_out1
 
 class FPN(nn.Module):
     def __init__(self,
@@ -92,7 +100,7 @@ class FPN(nn.Module):
 
             self.lateral_convs.append(l_conv)  # 将 lateral 卷积层添加到列表中
             self.fpn_convs.append(fpn_conv)  # 将 FPN 卷积层添加到列表中
-            self.se_list.append(SE_Block(out_channels))
+            self.se_list.append(NAMAttention(out_channels))
             
     def forward(self, inputs):
         """
