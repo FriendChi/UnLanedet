@@ -9,29 +9,41 @@ import torch.nn.functional as F
 
 from mmcv.cnn import ConvModule
 from ....layers import Conv2d,get_norm,Activation
-class SE_Block(nn.Module):
-    def __init__(self, inchannel,outchannel, ratio=16):
-        super(SE_Block, self).__init__()
-        # 全局平均池化(Fsq操作)
-        self.gap = nn.AdaptiveAvgPool2d((1, 1))
-        # 两个全连接层(Fex操作)
-        self.fc = nn.Sequential(
-            nn.Linear(inchannel, inchannel // ratio, bias=False),  # 从 c -> c/r
-            nn.ReLU(),
-            nn.Linear(inchannel // ratio, outchannel, bias=False),  # 从 c/r -> c
-            nn.Sigmoid()
-        )
-        self.outchannel = outchannel
- 
+class CoordAtt(nn.Module):
+    def __init__(self, inp, oup, groups=32):
+        super(CoordAtt, self).__init__()
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+
+        mip = max(8, inp // groups)
+
+        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(mip)
+        self.conv2 = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.conv3 = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.relu = h_swish()
+
     def forward(self, x):
-            # 读取批数据图片数量及通道数
-            b, c, h, w = x.size()
-            # Fsq操作：经池化后输出b*c的矩阵
-            y = self.gap(x).view(b, c)
-            # Fex操作：经全连接层输出（b，c，1，1）矩阵
-            y = self.fc(y).view(b, self.outchannel, 1, 1)
-            # Fscale操作：将得到的权重乘以原来的特征图x
-            return x * y.expand_as(x)
+        identity = x
+        n,c,h,w = x.size()
+        x_h = self.pool_h(x)
+        x_w = self.pool_w(x).permute(0, 1, 3, 2)
+
+        y = torch.cat([x_h, x_w], dim=2)
+        y = self.conv1(y)
+        y = self.bn1(y)
+        y = self.relu(y) 
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
+
+        x_h = self.conv2(x_h).sigmoid()
+        x_w = self.conv3(x_w).sigmoid()
+        x_h = x_h.expand(-1, -1, h, w)
+        x_w = x_w.expand(-1, -1, h, w)
+
+        y = identity * x_w * x_h
+
+        return y
 
 
 class FPN(nn.Module):
@@ -65,8 +77,8 @@ class FPN(nn.Module):
         self.start_level = 0  # 设置起始层，通常为 0
         self.lateral_convs = nn.ModuleList()  # 用于存储 lateral 卷积层的列表
         self.fpn_convs = nn.ModuleList()  # 用于存储 FPN 卷积层的列表
-        self.se_list = nn.ModuleList()
-
+        self.ca_list = nn.ModuleList()
+        
         # 初始化 lateral 卷积和 FPN 卷积层
         for i in range(self.start_level, self.backbone_end_level):
             #横向卷积层,1*1卷积用于保持通道统一
@@ -90,11 +102,10 @@ class FPN(nn.Module):
                 act_cfg=None,  # 激活函数配置（未指定）
                 inplace=False,
             )
-
+            self.ca_list.append(CoordAtt(in_channels[i],in_channels[i]))
             self.lateral_convs.append(l_conv)  # 将 lateral 卷积层添加到列表中
             self.fpn_convs.append(fpn_conv)  # 将 FPN 卷积层添加到列表中
-        for i in range(len(self.lateral_convs)-1):
-            self.se_list.append(SE_Block(out_channels*2,out_channels))
+
     def forward(self, inputs):
         """
         Args:
@@ -119,7 +130,7 @@ class FPN(nn.Module):
 
         # 构建 lateral 卷积层的输出
         laterals = [
-            lateral_conv(inputs[i + self.start_level])  # 通过 lateral 卷积对每个输入特征图进行处理
+            lateral_conv(self.ca_list[i](inputs[i + self.start_level]))  # 通过 lateral 卷积对每个输入特征图进行处理
             for i, lateral_conv in enumerate(self.lateral_convs)
         ]
 
@@ -127,8 +138,8 @@ class FPN(nn.Module):
         used_backbone_levels = len(laterals)  # 使用的骨干网络层数，即 lateral 卷积层的数量
         for i in range(used_backbone_levels - 1, 0, -1):  # 从最后一层往前遍历
             prev_shape = laterals[i - 1].shape[2:]  # 获取上一层的空间维度（不包括 batch 和通道）
-            laterals[i - 1] = torch.cat([laterals[i - 1], F.interpolate(laterals[i], size=prev_shape, mode='nearest'  )], dim=1)
-            laterals[i-1] = self.se_list[i-1](laterals[i-1])
+            laterals[i - 1] += F.interpolate(laterals[i], size=prev_shape, mode='nearest'  )
+            
             
         # 对每一层的特征图进行 FPN 卷积处理
         outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)]
