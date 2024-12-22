@@ -6,7 +6,25 @@ import torch.nn.functional as F
 from torch import nn
 
 from ....layers import Conv2d,get_norm,Activation
+class h_sigmoid(nn.Module):
+    def __init__(self, inplace=True):
+        super(h_sigmoid, self).__init__()
+        self.relu = nn.ReLU6(inplace=inplace)
 
+    def forward(self, x):
+        return self.relu(x + 3) / 6
+
+class h_swish(nn.Module):
+    def __init__(self, inplace=True):
+        super(h_swish, self).__init__()
+        self.sigmoid = h_sigmoid(inplace=inplace)
+
+    def forward(self, x):
+        return x * self.sigmoid(x)
+
+class swish(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(x)
 class CoordAtt(nn.Module):
     def __init__(self, inp, oup, groups=32):
         super(CoordAtt, self).__init__()
