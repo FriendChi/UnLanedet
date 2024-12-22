@@ -1,15 +1,14 @@
-import math
-import warnings
-import fvcore.nn.weight_init as weight_init
-import torch
-import torch.nn.functional as F
-from torch import nn
+"""
+Adapted from:
+https://github.com/Turoad/CLRNet/blob/main/clrnet/models/necks/fpn.py
+"""
+
+
 import torch.nn as nn
 import torch.nn.functional as F
-
+import torch
 from mmcv.cnn import ConvModule
-from ....layers import Conv2d,get_norm,Activation
-
+from mmdet.models.builder import NECKS
 class DSConv_pro(nn.Module):
     def __init__(
         self,
@@ -348,28 +347,18 @@ class EncoderConv(nn.Module):
         x = self.relu(x)
         return x
 
-class FPN(nn.Module):
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 num_outs,
-                 start_level=0,
-                 end_level=-1,
-                 add_extra_convs=False,
-                 extra_convs_on_inputs=True,
-                 relu_before_extra_convs=False,
-                 no_norm_on_lateral=False,
-                 conv_cfg=None,
-                 norm_cfg=None,
-                 attention=False,
-                 act_cfg=None,
-                 upsample_cfg=dict(mode='nearest'),
-                 init_cfg=dict(type='Xavier',
-                               layer='Conv2d',
-                               distribution='uniform'),
-                 cfg=None):
-        super(FPN, self).__init__()
-        # assert isinstance(in_channels, list)
+@NECKS.register_module
+class CLRerNetFPN(nn.Module):
+    def __init__(self, in_channels, out_channels, num_outs):
+        """
+        Feature pyramid network with Fast Normalized Fusion for CLRerNet.
+        Args:
+            in_channels (List[int]): Channel number list.
+            out_channels (int): Number of output feature map channels.
+            num_outs (int): Number of output feature map levels.
+        """
+        super(CLRerNetFPN, self).__init__()
+        assert isinstance(in_channels, list)
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.num_ins = len(in_channels)
@@ -377,7 +366,7 @@ class FPN(nn.Module):
 
         self.backbone_end_level = self.num_ins
         self.start_level = 0
-        self.lateral_convs = nn.ModuleList()
+        # self.lateral_convs = nn.ModuleList()
         self.fpn_convs = nn.ModuleList()
         self.conv0x_list = nn.ModuleList()
         self.conv0y_list = nn.ModuleList()
@@ -387,25 +376,25 @@ class FPN(nn.Module):
         for i in range(self.start_level, self.backbone_end_level):
             conv0x = DSConv_pro(
                 in_channels[i],
-                in_channels[i],
+                out_channels//2,
                 3,
                 0,
             )
             conv0y = DSConv_pro(
                 in_channels[i],
-                in_channels[i],
+                out_channels//2,
                 3,
                 1,
             )
-            l_conv = ConvModule(
-                2*in_channels[i],
-                out_channels,
-                1,
-                conv_cfg=None,
-                norm_cfg=None,
-                act_cfg=None,
-                inplace=False,
-            )
+            # l_conv = ConvModule(
+            #     2*in_channels[i],
+            #     out_channels,
+            #     1,
+            #     conv_cfg=None,
+            #     norm_cfg=None,
+            #     act_cfg=None,
+            #     inplace=False,
+            # )
             fpn_conv = ConvModule(
                 out_channels,
                 out_channels,
@@ -417,7 +406,7 @@ class FPN(nn.Module):
                 inplace=False,
             )
 
-            self.lateral_convs.append(l_conv)
+            # self.lateral_convs.append(l_conv)
             self.fpn_convs.append(fpn_conv)
             self.conv0x_list.append(conv0x)
             self.conv0y_list.append(conv0y)
@@ -444,13 +433,13 @@ class FPN(nn.Module):
                 del inputs[0]
     
         # build laterals
-        lateral = [
+        laterals = [
             torch.cat((self.conv0x_list[i](inputs[i + self.start_level]), self.conv0y_list[i](inputs[i + self.start_level])), dim=1) for i in range(len(self.lateral_convs))
         ]
         
-        laterals = [
-            lateral_conv(lateral[i]) for i, lateral_conv in enumerate(self.lateral_convs)
-        ]
+        # laterals = [
+        #     lateral_conv(laterals[i]) for i, lateral_conv in enumerate(self.lateral_convs)
+        # ]
     
         # build top-down path
         used_backbone_levels = len(laterals)
