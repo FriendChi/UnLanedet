@@ -42,7 +42,6 @@ class EMA(nn.Module):  # 定义一个继承自 nn.Module 的 EMA 类
         weights = (torch.matmul(x11, x12) + torch.matmul(x21, x22)).reshape(b * self.groups, 1, h, w)  # 计算权重
         return (group_x * weights.sigmoid()).reshape(b, c, h, w)  # 应用权重并将形状恢复为原始大小
 
-它最后返回的是权值还是结果
 
 class FPN(nn.Module):
     def __init__(self,
