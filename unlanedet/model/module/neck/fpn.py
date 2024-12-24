@@ -347,18 +347,27 @@ class EncoderConv(nn.Module):
         x = self.relu(x)
         return x
 
-@NECKS.register_module
-class CLRerNetFPN(nn.Module):
-    def __init__(self, in_channels, out_channels, num_outs):
-        """
-        Feature pyramid network with Fast Normalized Fusion for CLRerNet.
-        Args:
-            in_channels (List[int]): Channel number list.
-            out_channels (int): Number of output feature map channels.
-            num_outs (int): Number of output feature map levels.
-        """
-        super(CLRerNetFPN, self).__init__()
-        assert isinstance(in_channels, list)
+class FPN(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 num_outs,
+                 start_level=0,
+                 end_level=-1,
+                 add_extra_convs=False,
+                 extra_convs_on_inputs=True,
+                 relu_before_extra_convs=False,
+                 no_norm_on_lateral=False,
+                 conv_cfg=None,
+                 norm_cfg=None,
+                 attention=False,
+                 act_cfg=None,
+                 upsample_cfg=dict(mode='nearest'),
+                 init_cfg=dict(type='Xavier',
+                               layer='Conv2d',
+                               distribution='uniform'),
+                 cfg=None):
+        super(FPN, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.num_ins = len(in_channels)
