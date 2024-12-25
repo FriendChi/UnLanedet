@@ -443,7 +443,7 @@ class FPN(nn.Module):
     
         # build laterals
         laterals = [
-            torch.cat((self.conv0x_list[i](inputs[i + self.start_level]), self.conv0y_list[i](inputs[i + self.start_level])), dim=1) for i in range(len(self.lateral_convs))
+            torch.cat((self.conv0x_list[i](inputs[i + self.start_level]), self.conv0y_list[i](inputs[i + self.start_level])), dim=1) for i in range(len(self.fpn_convs))
         ]
         
         # laterals = [
