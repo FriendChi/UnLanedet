@@ -3,7 +3,7 @@ Adapted from:
 https://github.com/Turoad/CLRNet/blob/main/clrnet/models/necks/fpn.py
 """
 
-
+import einops
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
