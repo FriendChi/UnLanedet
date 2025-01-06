@@ -44,7 +44,7 @@ class LGAG(nn.Module):
         )
         self.psi = nn.Sequential(
             nn.Conv2d(F_int, 1, kernel_size=1,stride=1,padding=0,bias=True),
-            nn.BatchNorm2d(1),
+            # nn.BatchNorm2d(1),
             nn.Sigmoid()
         )
         self.activation = act_layer(activation, inplace=True)
