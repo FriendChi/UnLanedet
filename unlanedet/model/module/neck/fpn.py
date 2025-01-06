@@ -48,14 +48,14 @@ class LGAG(nn.Module):
             nn.Sigmoid()
         )
         self.activation = act_layer(activation, inplace=True)
-    
+        self.dropout = nn.Dropout(0.01)
                 
     def forward(self, g, x):
         g1 = self.W_g(g)
         x1 = self.W_x(x)
         psi = self.activation(g1 + x1)
         psi = self.psi(psi)
-
+        psi = self.dropout(psi)
         return x*psi
 class FPN(nn.Module):
     def __init__(self,
