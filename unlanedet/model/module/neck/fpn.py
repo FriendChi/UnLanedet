@@ -28,6 +28,69 @@ def act_layer(act, inplace=False, neg_slope=0.2, n_prelu=1):
         raise NotImplementedError('activation layer [%s] is not found' % act)
     return layer
 
+class eca_layer(nn.Module):
+    """Constructs a ECA module.
+
+    Args:
+        channel: Number of channels of the input feature map
+        k_size: Adaptive selection of kernel size
+    """
+    def __init__(self, channel, k_size=3):
+        super(eca_layer, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False) 
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # feature descriptor on the global spatial information
+        y = self.avg_pool(x)
+
+        # Two different branches of ECA module
+        y = self.conv(y.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
+
+        # Multi-scale information fusion
+        y = self.sigmoid(y)
+
+        return x * y.expand_as(x)
+
+class MaxValueFusionECA(nn.Module):
+    """Combine Max Value Fusion in Multi-Scale ECA without weighting."""
+    
+    def __init__(self, channel, scales=[3, 5, 7]):
+        super(MaxValueFusionECA, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        
+        # Create multiple convolutions for different scales (kernel sizes)
+        self.convs = nn.ModuleList([
+            nn.Conv1d(1, 1, kernel_size=scale, padding=(scale - 1) // 2, bias=False)
+            for scale in scales
+        ])
+        
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # Global average pooling to get channel-wise feature descriptors
+        y = self.avg_pool(x)  # Shape: [B, C, 1, 1]
+        
+        # Apply different convolutions to capture multi-scale features
+        scale_outputs = []
+        for conv in self.convs:
+            scale_output = conv(y.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
+            scale_outputs.append(scale_output)
+        
+        # Concatenate outputs from different scales
+        concatenated_output = torch.cat(scale_outputs, dim=1)  # Shape: [B, n*C, 1, 1]
+
+        # Reshape to [B, C, n, 1, 1] so we can take the max for each channel across different scales
+        reshaped_output = concatenated_output.view(concatenated_output.size(0), -1, len(self.convs), 1, 1)  # [B, C, n, 1, 1]
+        
+        # Now for each channel, select the maximum value across the n scales
+        max_value_fusion, _ = torch.max(reshaped_output, dim=2, keepdim=True)  # Shape: [B, C, 1, 1]
+
+        # Apply sigmoid and return the final output
+        attention = self.sigmoid(max_value_fusion.squeeze(-1))  # Shape: [B, C, 1, 1]
+        return x * attention.expand_as(x)  # Apply attention to the original input
+
 class LGAG(nn.Module):
     def __init__(self, F_g, F_l, F_int, kernel_size=3, groups=1, activation='relu'):
         super(LGAG,self).__init__()
@@ -89,6 +152,7 @@ class FPN(nn.Module):
         self.lateral_convs = nn.ModuleList()  # 用于存储 lateral 卷积层的列表
         self.fpn_convs = nn.ModuleList()  # 用于存储 FPN 卷积层的列表
         self.galas = nn.ModuleList()
+        self.mid_module = MaxValueFusionECA(64)
         # 初始化 lateral 卷积和 FPN 卷积层
         for i in range(self.start_level, self.backbone_end_level):
             #横向卷积层,1*1卷积用于保持通道统一
@@ -133,9 +197,9 @@ class FPN(nn.Module):
         """
         if type(inputs) == tuple:  # 如果输入是 tuple 类型，将其转换为 list 类型
             inputs = list(inputs)
-
+        
         assert len(inputs) >= len(self.in_channels)  # 确保输入的特征图数量不小于 in_channels 的长度
-
+        inputs[0] =  self.mid_module(inputs[0])
         if len(inputs) > len(self.in_channels):  # 如果输入的特征图数量大于 in_channels 的长度
             for _ in range(len(inputs) - len(self.in_channels)):  # 删除多余的输入特征图
                 del inputs[0]
