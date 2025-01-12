@@ -35,16 +35,28 @@ class LGAG(nn.Module):
         if kernel_size == 1:
             groups = 1
         self.W_g = nn.Sequential(
-            nn.Conv2d(F_g, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
+            nn.Conv2d(F_g, F_int // 2, kernel_size=1, stride=1, bias=False),
+            nn.BatchNorm2d(F_int // 2),
+            nn.Conv2d(F_int // 2, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
             nn.BatchNorm2d(F_int)
         )
+        # self.W_g = nn.Sequential(
+        #     nn.Conv2d(F_g, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
+        #     nn.BatchNorm2d(F_int)
+        # )
         self.W_x = nn.Sequential(
-            nn.Conv2d(F_l, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
+            nn.Conv2d(F_l, F_int // 2, kernel_size=1, stride=1, bias=False),
+            nn.BatchNorm2d(F_int // 2),
+            nn.Conv2d(F_int // 2, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
             nn.BatchNorm2d(F_int)
         )
+        # self.W_x = nn.Sequential(
+        #     nn.Conv2d(F_l, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
+        #     nn.BatchNorm2d(F_int)
+        # )
         self.psi = nn.Sequential(
             nn.Conv2d(F_int, 1, kernel_size=1,stride=1,padding=0,bias=True),
-            # nn.BatchNorm2d(1),
+            nn.BatchNorm2d(1),
             nn.Sigmoid()
         )
         self.activation = act_layer(activation, inplace=True)
