@@ -34,12 +34,22 @@ class LGAG(nn.Module):
 
         if kernel_size == 1:
             groups = 1
+        # self.W_g = nn.Sequential(
+        #     nn.Conv2d(F_g, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
+        #     nn.BatchNorm2d(F_int)
+        # )
+        # self.W_x = nn.Sequential(
+        #     nn.Conv2d(F_l, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
+        #     nn.BatchNorm2d(F_int)
+        # )
         self.W_g = nn.Sequential(
-            nn.Conv2d(F_g, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
+            nn.Conv2d(F_g, F_int, kernel_size=3, stride=1, padding=1, groups=F_g, bias=False),  # 深度卷积
+            nn.Conv2d(F_int, F_int, kernel_size=1, bias=False),  # 点卷积
             nn.BatchNorm2d(F_int)
         )
         self.W_x = nn.Sequential(
-            nn.Conv2d(F_l, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
+            nn.Conv2d(F_l, F_int, kernel_size=3, stride=1, padding=1, groups=F_l, bias=False),
+            nn.Conv2d(F_int, F_int, kernel_size=1, bias=False),
             nn.BatchNorm2d(F_int)
         )
         self.psi = nn.Sequential(
