@@ -59,7 +59,7 @@ class MaxValueFusionECA(nn.Module):
     def __init__(self, channel, scales=[3, 5, 7]):
         super(MaxValueFusionECA, self).__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
         # Create multiple convolutions for different scales (kernel sizes)
         self.convs = nn.ModuleList([
             nn.Conv1d(1, 1, kernel_size=scale, padding=(scale - 1) // 2, bias=False)
@@ -70,7 +70,7 @@ class MaxValueFusionECA(nn.Module):
 
     def forward(self, x):
         # Global average pooling to get channel-wise feature descriptors
-        y = self.avg_pool(x)  # Shape: [B, C, 1, 1]
+        y = self.avg_pool(x)+self.max_pool(x)  # Shape: [B, C, 1, 1]
         
         # Apply different convolutions to capture multi-scale features
         scale_outputs = []
