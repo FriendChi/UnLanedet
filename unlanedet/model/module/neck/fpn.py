@@ -9,118 +9,54 @@ import torch.nn.functional as F
 
 from mmcv.cnn import ConvModule
 from ....layers import Conv2d,get_norm,Activation
-def act_layer(act, inplace=False, neg_slope=0.2, n_prelu=1):
-    # activation layer
-    act = act.lower()
-    if act == 'relu':
-        layer = nn.ReLU(inplace)
-    elif act == 'relu6':
-        layer = nn.ReLU6(inplace)
-    elif act == 'leakyrelu':
-        layer = nn.LeakyReLU(neg_slope, inplace)
-    elif act == 'prelu':
-        layer = nn.PReLU(num_parameters=n_prelu, init=neg_slope)
-    elif act == 'gelu':
-        layer = nn.GELU()
-    elif act == 'hswish':
-        layer = nn.Hardswish(inplace)
-    else:
-        raise NotImplementedError('activation layer [%s] is not found' % act)
-    return layer
+class LSKA(nn.Module):
+    def __init__(self, dim, k_size):
+        super().__init__()
 
-class eca_layer(nn.Module):
-    """Constructs a ECA module.
+        self.k_size = k_size
 
-    Args:
-        channel: Number of channels of the input feature map
-        k_size: Adaptive selection of kernel size
-    """
-    def __init__(self, channel, k_size=3):
-        super(eca_layer, self).__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
-        self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False) 
-        self.sigmoid = nn.Sigmoid()
+        if k_size == 7:
+            self.conv0h = nn.Conv2d(dim, dim, kernel_size=(1, 3), stride=(1,1), padding=(0,(3-1)//2), groups=dim)
+            self.conv0v = nn.Conv2d(dim, dim, kernel_size=(3, 1), stride=(1,1), padding=((3-1)//2,0), groups=dim)
+            self.conv_spatial_h = nn.Conv2d(dim, dim, kernel_size=(1, 3), stride=(1,1), padding=(0,2), groups=dim, dilation=2)
+            self.conv_spatial_v = nn.Conv2d(dim, dim, kernel_size=(3, 1), stride=(1,1), padding=(2,0), groups=dim, dilation=2)
+        elif k_size == 11:
+            self.conv0h = nn.Conv2d(dim, dim, kernel_size=(1, 3), stride=(1,1), padding=(0,(3-1)//2), groups=dim)
+            self.conv0v = nn.Conv2d(dim, dim, kernel_size=(3, 1), stride=(1,1), padding=((3-1)//2,0), groups=dim)
+            self.conv_spatial_h = nn.Conv2d(dim, dim, kernel_size=(1, 5), stride=(1,1), padding=(0,4), groups=dim, dilation=2)
+            self.conv_spatial_v = nn.Conv2d(dim, dim, kernel_size=(5, 1), stride=(1,1), padding=(4,0), groups=dim, dilation=2)
+        elif k_size == 23:
+            self.conv0h = nn.Conv2d(dim, dim, kernel_size=(1, 5), stride=(1,1), padding=(0,(5-1)//2), groups=dim)
+            self.conv0v = nn.Conv2d(dim, dim, kernel_size=(5, 1), stride=(1,1), padding=((5-1)//2,0), groups=dim)
+            self.conv_spatial_h = nn.Conv2d(dim, dim, kernel_size=(1, 7), stride=(1,1), padding=(0,9), groups=dim, dilation=3)
+            self.conv_spatial_v = nn.Conv2d(dim, dim, kernel_size=(7, 1), stride=(1,1), padding=(9,0), groups=dim, dilation=3)
+        elif k_size == 35:
+            self.conv0h = nn.Conv2d(dim, dim, kernel_size=(1, 5), stride=(1,1), padding=(0,(5-1)//2), groups=dim)
+            self.conv0v = nn.Conv2d(dim, dim, kernel_size=(5, 1), stride=(1,1), padding=((5-1)//2,0), groups=dim)
+            self.conv_spatial_h = nn.Conv2d(dim, dim, kernel_size=(1, 11), stride=(1,1), padding=(0,15), groups=dim, dilation=3)
+            self.conv_spatial_v = nn.Conv2d(dim, dim, kernel_size=(11, 1), stride=(1,1), padding=(15,0), groups=dim, dilation=3)
+        elif k_size == 41:
+            self.conv0h = nn.Conv2d(dim, dim, kernel_size=(1, 5), stride=(1,1), padding=(0,(5-1)//2), groups=dim)
+            self.conv0v = nn.Conv2d(dim, dim, kernel_size=(5, 1), stride=(1,1), padding=((5-1)//2,0), groups=dim)
+            self.conv_spatial_h = nn.Conv2d(dim, dim, kernel_size=(1, 13), stride=(1,1), padding=(0,18), groups=dim, dilation=3)
+            self.conv_spatial_v = nn.Conv2d(dim, dim, kernel_size=(13, 1), stride=(1,1), padding=(18,0), groups=dim, dilation=3)
+        elif k_size == 53:
+            self.conv0h = nn.Conv2d(dim, dim, kernel_size=(1, 5), stride=(1,1), padding=(0,(5-1)//2), groups=dim)
+            self.conv0v = nn.Conv2d(dim, dim, kernel_size=(5, 1), stride=(1,1), padding=((5-1)//2,0), groups=dim)
+            self.conv_spatial_h = nn.Conv2d(dim, dim, kernel_size=(1, 17), stride=(1,1), padding=(0,24), groups=dim, dilation=3)
+            self.conv_spatial_v = nn.Conv2d(dim, dim, kernel_size=(17, 1), stride=(1,1), padding=(24,0), groups=dim, dilation=3)
 
-    def forward(self, x):
-        # feature descriptor on the global spatial information
-        y = self.avg_pool(x)+self.max_pool(x)
-        
-        # Two different branches of ECA module
-        y = self.conv(y.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
+        self.conv1 = nn.Conv2d(dim, dim, 1)
 
-        # Multi-scale information fusion
-        y = self.sigmoid(y)
-
-        return x * y.expand_as(x)
-
-class MaxValueFusionECA(nn.Module):
-    """Combine Max Value Fusion in Multi-Scale ECA without weighting."""
-    
-    def __init__(self, channel, scales=[3, 5, 7]):
-        super(MaxValueFusionECA, self).__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
-        # Create multiple convolutions for different scales (kernel sizes)
-        self.convs = nn.ModuleList([
-            nn.Conv1d(1, 1, kernel_size=scale, padding=(scale - 1) // 2, bias=False)
-            for scale in scales
-        ])
-        
-        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        # Global average pooling to get channel-wise feature descriptors
-        y = self.avg_pool(x)+self.max_pool(x)  # Shape: [B, C, 1, 1]
-        
-        # Apply different convolutions to capture multi-scale features
-        scale_outputs = []
-        for conv in self.convs:
-            scale_output = conv(y.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
-            scale_outputs.append(scale_output)
-        
-        # Concatenate outputs from different scales
-        concatenated_output = torch.cat(scale_outputs, dim=1)  # Shape: [B, n*C, 1, 1]
-
-        # Reshape to [B, C, n, 1, 1] so we can take the max for each channel across different scales
-        reshaped_output = concatenated_output.view(concatenated_output.size(0), -1, len(self.convs), 1, 1)  # [B, C, n, 1, 1]
-        
-        # Now for each channel, select the maximum value across the n scales
-        max_value_fusion, _ = torch.max(reshaped_output, dim=2, keepdim=True)  # Shape: [B, C, 1, 1]
-
-        # Apply sigmoid and return the final output
-        attention = self.sigmoid(max_value_fusion.squeeze(-1))  # Shape: [B, C, 1, 1]
-        return x * attention.expand_as(x)  # Apply attention to the original input
-
-class LGAG(nn.Module):
-    def __init__(self, F_g, F_l, F_int, kernel_size=3, groups=1, activation='relu'):
-        super(LGAG,self).__init__()
-
-        if kernel_size == 1:
-            groups = 1
-        self.W_g = nn.Sequential(
-            nn.Conv2d(F_g, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
-            nn.BatchNorm2d(F_int)
-        )
-        self.W_x = nn.Sequential(
-            nn.Conv2d(F_l, F_int, kernel_size=kernel_size, stride=1, padding=kernel_size//2, groups=groups, bias=True),
-            nn.BatchNorm2d(F_int)
-        )
-        self.psi = nn.Sequential(
-            nn.Conv2d(F_int, 1, kernel_size=1,stride=1,padding=0,bias=True),
-            nn.BatchNorm2d(1),
-            nn.Sigmoid()
-        )
-        self.activation = act_layer(activation, inplace=True)
-    
-                
-    def forward(self, g, x):
-        g1 = self.W_g(g)
-        x1 = self.W_x(x)
-        psi = self.activation(g1 + x1)
-        psi = self.psi(psi)
-
-        return x*psi
+        u = x.clone()
+        attn = self.conv0h(x)
+        attn = self.conv0v(attn)
+        attn = self.conv_spatial_h(attn)
+        attn = self.conv_spatial_v(attn)
+        attn = self.conv1(attn)
+        return u * attn
 class FPN(nn.Module):
     def __init__(self,
                  in_channels,
@@ -153,7 +89,7 @@ class FPN(nn.Module):
         self.lateral_convs = nn.ModuleList()  # 用于存储 lateral 卷积层的列表
         self.fpn_convs = nn.ModuleList()  # 用于存储 FPN 卷积层的列表
         self.galas = nn.ModuleList()
-        self.mid_module = eca_layer(64)
+        self.mid_module = LSKA(64,7)
         # 初始化 lateral 卷积和 FPN 卷积层
         for i in range(self.start_level, self.backbone_end_level):
             #横向卷积层,1*1卷积用于保持通道统一
