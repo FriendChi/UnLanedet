@@ -12,31 +12,36 @@ from ....layers import Conv2d,get_norm,Activation
 
 import torch  # 导入 PyTorch 库
 from torch import nn  # 从 PyTorch 中导入神经网络模块
-class eca_layer(nn.Module):
-   """Constructs a ECA module.
+class Channel_Att(nn.Module):
+    def __init__(self, channels):
+        super(Channel_Att, self).__init__()
+        self.channels = channels
 
-   Args:
-       channel: Number of channels of the input feature map
-       k_size: Adaptive selection of kernel size
-   """
-   def __init__(self, channel, k_size=3):
-       super(eca_layer, self).__init__()
-       self.avg_pool = nn.AdaptiveAvgPool2d(1)
-       self.max_pool = nn.AdaptiveMaxPool2d(1)
-       self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False) 
-       self.sigmoid = nn.Sigmoid()
+        self.bn2 = nn.BatchNorm2d(self.channels, affine=True)
 
-   def forward(self, x):
-       # feature descriptor on the global spatial information
-       y = self.avg_pool(x)+self.max_pool(x)
-       
-       # Two different branches of ECA module
-       y = self.conv(y.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
+    def forward(self, x):
+        residual = x
 
-       # Multi-scale information fusion
-       y = self.sigmoid(y)
+        x = self.bn2(x)
+        weight_bn = self.bn2.weight.data.abs() / torch.sum(self.bn2.weight.data.abs())
+        x = x.permute(0, 2, 3, 1).contiguous()
+        x = torch.mul(weight_bn, x)
+        x = x.permute(0, 3, 1, 2).contiguous()
 
-       return x * y.expand_as(x)
+        x = torch.sigmoid(x) * residual  #
+
+        return x
+
+
+class NAMAttention(nn.Module):
+    def __init__(self, channels):
+        super(NAMAttention, self).__init__()
+        self.Channel_Att = Channel_Att(channels)
+
+    def forward(self, x):
+        x_out1 = self.Channel_Att(x)
+
+        return x_out1
 class EMA(nn.Module):  # 定义一个继承自 nn.Module 的 EMA 类
     def __init__(self, channels, c2=None, factor=32):  # 构造函数，初始化对象
         super(EMA, self).__init__()  # 调用父类的构造函数
@@ -99,7 +104,7 @@ class FPN(nn.Module):
         self.lateral_convs = nn.ModuleList()  # 用于存储 lateral 卷积层的列表
         self.fpn_convs = nn.ModuleList()  # 用于存储 FPN 卷积层的列表
         self.se_list = nn.ModuleList()
-        self.mid_module = eca_layer(64)
+        self.mid_module = NAMAttention(64)
         # 初始化 lateral 卷积和 FPN 卷积层
         for i in range(self.start_level, self.backbone_end_level):
             #横向卷积层,1*1卷积用于保持通道统一
