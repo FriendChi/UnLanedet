@@ -104,7 +104,7 @@ class FPN(nn.Module):
         self.lateral_convs = nn.ModuleList()  # 用于存储 lateral 卷积层的列表
         self.fpn_convs = nn.ModuleList()  # 用于存储 FPN 卷积层的列表
         self.se_list = nn.ModuleList()
-        self.mid_module = NAMAttention(64)
+        self.mid_module = EMA(64)
         # 初始化 lateral 卷积和 FPN 卷积层
         for i in range(self.start_level, self.backbone_end_level):
             #横向卷积层,1*1卷积用于保持通道统一
